@@ -15,19 +15,25 @@ st.set_page_config(
 # 1. BİGQUERY BAĞLANTISI VE VERİ ÇEKME
 # -------------------------------------------------------------
 @st.cache_data(ttl=600)
+@st.cache_data(ttl=600)
 def load_data():
     project_id = "sustainability-510714"
     table_id = "sustainability-510714.sustainability_data.sustainability_dataset"
 
-    # Streamlit Cloud üzerinde Secrets kontrolü
     if "gcp_service_account" in st.secrets:
-        # dict() sarmalaması olası AttrDict uyuşmazlığını engeller
+        # st.secrets AttrDict nesnesini standart dict yapısına dönüştürün
         key_dict = dict(st.secrets["gcp_service_account"])
+        
+        # Kaçış karakterlerini ve satır sonu boşluklarını temizleyin
+        raw_key = key_dict["private_key"]
+        raw_key = raw_key.replace("\\n", "\n").replace("\r", "").strip()
+        key_dict["private_key"] = raw_key
+
         credentials = service_account.Credentials.from_service_account_info(key_dict)
         client = bigquery.Client(credentials=credentials, project=project_id)
     else:
-        # Yerel geliştirme için (GOOGLE_APPLICATION_CREDENTIALS yüklüyse)
-        client = bigquery.Client(project=project_id)
+        st.error("Streamlit Secrets içinde 'gcp_service_account' bulunamadı!")
+        st.stop()
 
     query = f"""
         SELECT 
@@ -43,7 +49,6 @@ def load_data():
     """
     df = client.query(query).to_dataframe()
 
-    # Sayısal alanları güvenli bir şekilde float/int türlerine zorla
     numeric_cols = [
         "total_electricity_consumed_kwh",
         "offsite_electricity_percentage",
