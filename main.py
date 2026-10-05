@@ -4,7 +4,7 @@ import plotly.express as px
 
 st.set_page_config(page_title="Yıldız Holding ESG KPI Portalı", layout="wide")
 
-st.title("🌱 Yıldız Holding - Şirket Bazlı Karbon & KPI Portalı")
+st.title("🌱 Yıldız Holding - Şirket Bazlı Sürdürülebilirlik Raporu ")
 st.caption("20 Ülke | 50+ Şirket MVP İzleme Paneli")
 
 # 10 Şirket ve Temel KPI Verisi
