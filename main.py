@@ -111,7 +111,7 @@ with col_head2:
         pdf_bytes = generate_pdf_report(selected_company, company_all_years_df)
         
         st.download_button(
-            label="📑 Download 3-Year KPI Report (PDF)",
+            label="Download Sustainability and Carbon Report(PDF)",
             data=pdf_bytes,
             file_name=f"Sustainability_Report_{selected_company}_2025_2027.pdf",
             mime="application/pdf",
