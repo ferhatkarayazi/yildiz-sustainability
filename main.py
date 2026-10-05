@@ -79,7 +79,7 @@ col_head1, col_head2 = st.columns([3, 1])
 
 with col_head1:
     st.title("Sustainability Data Platform")
-    st.caption("BigQuery Dataproduct: `sustainability-510714.sustainability_data.sustainability_dataset`")
+    st.caption("BigQuery Data Product: `sustainability-510714.sustainability_data.sustainability_dataset`")
 
 # Filtre Seçimleri
 col_filter1, col_filter2 = st.columns([2, 1])
