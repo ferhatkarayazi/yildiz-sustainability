@@ -233,70 +233,58 @@ if uploaded_file is not None:
     try:
         new_df = pd.read_excel(uploaded_file)
         
-        # Beklenen zorunlu kolonların kontrolü
+        # Sütun başlıklarındaki boşlukları temizle ve küçük harfe çevir
+        new_df.columns = [str(col).strip().lower() for col in new_df.columns]
+        
+        # Zorunlu kolonlar
         required_cols = [
-            "company_name", "year", "total_electricity_consumed_kwh",
-            "offsite_electricity_percentage", "renewable_energy_percentage",
+            "company_name", 
+            "year", 
+            "total_electricity_consumed_kwh",
+            "offsite_electricity_percentage", 
+            "renewable_energy_percentage", 
             "total_gas_consumed_m3"
         ]
         
-        if not all(col in new_df.columns for col in required_cols):
-            st.sidebar.error("Hata: Excel dosyasındaki kolon isimleri BigQuery şemasıyla uyuşmuyor.")
+        missing_cols = [col for col in required_cols if col not in new_df.columns]
+        
+        if missing_cols:
+            st.error(f"❌ Missing required columns in Excel file: **{', '.join(missing_cols)}**")
         else:
-            if st.sidebar.button("🚀 BigQuery'ye Aktar ve Güncelle"):
-                with st.spinner("Veriler BigQuery'ye işleniyor..."):
-                    # Veri tiplerini güvenli hale getir
+            if st.button("🚀 Upload & Update BigQuery", type="primary", use_container_width=True):
+                with st.spinner("Syncing data with BigQuery..."):
+                    # Veri tiplerini güvenli formata dönüştür
                     for col in required_cols[2:]:
                         new_df[col] = pd.to_numeric(new_df[col], errors="coerce").fillna(0.0)
                     new_df["year"] = new_df["year"].astype(int)
                     new_df["company_name"] = new_df["company_name"].astype(str)
 
-                    # BigQuery Client (Daha önce tanımlanan client nesnesi)
-                    project_id = "sustainability-510714"
-                    dataset_id = "sustainability_data"
-                    target_table = f"{project_id}.{dataset_id}.sustainability_dataset"
-                    temp_table = f"{project_id}.{dataset_id}.temp_sustainability_upload"
+                    # BigQuery Client kurulumu
+                    key_dict = dict(st.secrets["gcp_service_account"])
+                    raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
+                    key_dict["private_key"] = raw_key
+                    credentials = service_account.Credentials.from_service_account_info(key_dict)
+                    client = bigquery.Client(credentials=credentials, project="sustainability-510714")
 
-                    # 1. Adım: Geçici (Staging) tabloya yükle
+                    # Mevcut veriyle birleştir (Upsert: Aynı şirket ve yıl varsa yüklenen Excel geçerli olur)
+                    combined_df = pd.concat([df[required_cols], new_df[required_cols]]).drop_duplicates(
+                        subset=["company_name", "year"], 
+                        keep="last"
+                    ).reset_index(drop=True)
+
+                    target_table = "sustainability-510714.sustainability_data.sustainability_dataset"
+
+                    # Ücretsiz Load Job ile tablonun üzerine yazma
                     job_config = bigquery.LoadJobConfig(
                         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
                     )
-                    load_job = client.load_table_from_dataframe(new_df, temp_table, job_config=job_config)
-                    load_job.result()  # Yüklemenin bitmesini bekle
+                    load_job = client.load_table_from_dataframe(combined_df, target_table, job_config=job_config)
+                    load_job.result()
 
-                    # 2. Adım: MERGE sorgusuyla varsa güncelle, yoksa ekle (Upsert)
-                    merge_query = f"""
-                        MERGE `{target_table}` T
-                        USING `{temp_table}` S
-                        ON T.company_name = S.company_name AND T.year = S.year
-                        WHEN MATCHED THEN
-                          UPDATE SET
-                            total_electricity_consumed_kwh = S.total_electricity_consumed_kwh,
-                            offsite_electricity_percentage = S.offsite_electricity_percentage,
-                            renewable_energy_percentage = S.renewable_energy_percentage,
-                            total_gas_consumed_m3 = S.total_gas_consumed_m3,
-                            total_km_covered_km = S.total_km_covered_km
-                        WHEN NOT MATCHED THEN
-                          INSERT (
-                            company_name, year, total_electricity_consumed_kwh,
-                            offsite_electricity_percentage, renewable_energy_percentage,
-                            total_gas_consumed_m3, total_km_covered_km
-                          )
-                          VALUES (
-                            S.company_name, S.year, S.total_electricity_consumed_kwh,
-                            S.offsite_electricity_percentage, S.renewable_energy_percentage,
-                            S.total_gas_consumed_m3, S.total_km_covered_km
-                          );
-                    """
-                    client.query(merge_query).result()
-
-                    # 3. Adım: Geçici tabloyu temizle
-                    client.delete_table(temp_table, not_found_ok=True)
-
-                    # Streamlit önbelleğini sıfırla ve sayfayı yenile
+                    # Önbelleği temizle ve sayfayı yenile
                     st.cache_data.clear()
-                    st.sidebar.success("Veriler başarıyla güncellendi!")
+                    st.success("✅ Data successfully updated in BigQuery!")
                     st.rerun()
 
     except Exception as e:
-        st.sidebar.error(f"İşlem sırasında hata oluştu: {e}")
+        st.error(f"An error occurred during processing: {e}")
