@@ -6,7 +6,7 @@ from google.oauth2 import service_account
 
 # Sayfa Yapılandırması
 st.set_page_config(
-    page_title="Yıldız Holding - Sürdürülebilirlik Paneli",
+    page_title="Sustainability Data Platform",
     page_icon="🌱",
     layout="wide"
 )
@@ -42,8 +42,7 @@ def load_data():
             total_electricity_consumed_kwh,
             offsite_electricity_percentage,
             renewable_energy_percentage,
-            total_gas_consumed_m3,
-            total_km_covered_km
+            total_gas_consumed_m3
         FROM `{table_id}`
         ORDER BY company_name, year DESC
     """
@@ -53,8 +52,7 @@ def load_data():
         "total_electricity_consumed_kwh",
         "offsite_electricity_percentage",
         "renewable_energy_percentage",
-        "total_gas_consumed_m3",
-        "total_km_covered_km"
+        "total_gas_consumed_m3"
     ]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
@@ -80,10 +78,10 @@ companies = sorted(df["company_name"].dropna().unique())
 years = sorted(df["year"].dropna().unique(), reverse=True)
 
 with col_filter1:
-    selected_company = st.selectbox("🏢 Şirket Seçin", companies)
+    selected_company = st.selectbox("Select Company", companies)
 
 with col_filter2:
-    selected_year = st.selectbox("📅 Yıl Seçin", years)
+    selected_year = st.selectbox("Select Year", years)
 
 filtered_df = df[(df["company_name"] == selected_company) & (df["year"] == selected_year)]
 
@@ -98,24 +96,24 @@ st.divider()
 # -------------------------------------------------------------
 # 3. DASHBOARD 1: ENERJİ DAĞILIMI VE ELEKTRİK
 # -------------------------------------------------------------
-st.subheader("1. Enerji Dağılımı ve Elektrik Tüketimi")
+st.subheader("Electricity & Renewable Energy Share")
 
 d1_col1, d1_col2 = st.columns([1, 2])
 
 with d1_col1:
     st.metric(
-        label="Toplam Elektrik Tüketimi",
+        label="Total Electricity Consumption",
         value=f"{float(data['total_electricity_consumed_kwh']):,.0f} kWh".replace(",", ".")
     )
     st.info(
-        f"**Tesis Dışı (Offsite) Elektrik:** %{float(data['offsite_electricity_percentage']):.1f}\n\n"
-        f"**Yenilenebilir Enerji Oranı:** %{float(data['renewable_energy_percentage']):.1f}"
+        f"**Off-Site Electricity Percentage:** %{float(data['offsite_electricity_percentage']):.1f}\n\n"
+        f"**Renewable Energy Percentage:** %{float(data['renewable_energy_percentage']):.1f}"
     )
 
 with d1_col2:
     pie_data = pd.DataFrame({
-        "Kaynak": ["Offsite Elektrik", "Yenilenebilir Enerji"],
-        "Yüzde": [
+        "Source": ["Off-Site Electricity", "Renewable Energy"],
+        "Percentage": [
             float(data["offsite_electricity_percentage"]),
             float(data["renewable_energy_percentage"])
         ]
@@ -123,15 +121,15 @@ with d1_col2:
 
     fig_pie = px.pie(
         pie_data,
-        names="Kaynak",
-        values="Yüzde",
-        color="Kaynak",
+        names="Source",
+        values="Percentage",
+        color="Source",
         color_discrete_map={
-            "Offsite Elektrik": "#2563EB",
-            "Yenilenebilir Enerji": "#10B981"
+            "Off-Site Electricity": "#2563EB",
+            "Renewable Energy": "#10B981"
         },
         hole=0.45,
-        title=f"{selected_company} - Elektrik Kaynak Dağılımı ({selected_year})"
+        title=f"{selected_company} - Electricity Source Distribution ({selected_year})"
     )
     fig_pie.update_traces(textposition='inside', textinfo='percent+label')
     fig_pie.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=300)
@@ -142,24 +140,19 @@ st.divider()
 # -------------------------------------------------------------
 # 4. DASHBOARD 2: TÜKETİM, MESAFE VE CO2 SALINIMI
 # -------------------------------------------------------------
-st.subheader("2. Kaynak Tüketimi & Karbon Ayak İzi (t-CO₂e)")
+st.subheader("2. Resource Consumption & Carbon Footprint")
 
 # Ham Metrikler
 m1, m2, m3 = st.columns(3)
 with m1:
     st.metric(
-        "Toplam Elektrik",
+        "Total Electricity Consumption",
         f"{float(data['total_electricity_consumed_kwh']):,.0f} kWh".replace(",", ".")
     )
 with m2:
     st.metric(
-        "Toplam Doğalgaz",
+        "Total Natural Gas Consumption",
         f"{float(data['total_gas_consumed_m3']):,.0f} m³".replace(",", ".")
-    )
-with m3:
-    st.metric(
-        "Katedilen Mesafe",
-        f"{float(data['total_km_covered_km']):,.0f} km".replace(",", ".")
     )
 
 # Emisyon Hesaplamaları:
@@ -172,23 +165,23 @@ co2_gas_kg = gas_m3 * 2.00
 total_co2_kg = co2_elec_kg + co2_gas_kg
 total_co2_tons = total_co2_kg / 1000.0
 
-st.markdown("#### 🌍 Karbon Salınım Hesaplaması")
+st.markdown("#### 🌍 Carbon Footprint Calculation")
 
 c1, c2, c3 = st.columns(3)
 with c1:
     st.metric(
-        label="Elektrik Kaynaklı Salınım (0,40 kg/kWh)",
+        label="Electricity-Related Emissions (0.40 kg/kWh)",
         value=f"{co2_elec_kg:,.0f} kg CO₂".replace(",", ".")
     )
 with c2:
     st.metric(
-        label="Doğalgaz Kaynaklı Salınım (2,00 kg/m³)",
+        label="Natural Gas-Related Emissions (2.00 kg/m³)",
         value=f"{co2_gas_kg:,.0f} kg CO₂".replace(",", ".")
     )
 with c3:
     st.metric(
-        label="Toplam Karbon Ayak İzi",
+        label="Total Carbon Footprint",
         value=f"{total_co2_tons:,.2f} Ton CO₂e".replace(",", "."),
-        delta="Elektrik + Doğalgaz",
+        delta="Electricity + Natural Gas",
         delta_color="off"
     )
