@@ -1,3 +1,4 @@
+import io
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -12,28 +13,24 @@ st.set_page_config(
 )
 
 # -------------------------------------------------------------
-# 1. BİGQUERY BAĞLANTISI VE VERİ ÇEKME
+# 1. BİGQUERY CLIENT VE VERİ ÇEKME
 # -------------------------------------------------------------
-@st.cache_data(ttl=600)
-@st.cache_data(ttl=600)
-def load_data():
+def get_bigquery_client():
     project_id = "sustainability-510714"
-    table_id = "sustainability-510714.sustainability_data.sustainability_dataset"
-
     if "gcp_service_account" in st.secrets:
-        # st.secrets AttrDict nesnesini standart dict yapısına dönüştürün
         key_dict = dict(st.secrets["gcp_service_account"])
-        
-        # Kaçış karakterlerini ve satır sonu boşluklarını temizleyin
-        raw_key = key_dict["private_key"]
-        raw_key = raw_key.replace("\\n", "\n").replace("\r", "").strip()
+        raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
         key_dict["private_key"] = raw_key
-
         credentials = service_account.Credentials.from_service_account_info(key_dict)
-        client = bigquery.Client(credentials=credentials, project=project_id)
+        return bigquery.Client(credentials=credentials, project=project_id)
     else:
         st.error("Streamlit Secrets içinde 'gcp_service_account' bulunamadı!")
         st.stop()
+
+@st.cache_data(ttl=600)
+def load_data():
+    client = get_bigquery_client()
+    table_id = "sustainability-510714.sustainability_data.sustainability_dataset"
 
     query = f"""
         SELECT 
@@ -60,29 +57,116 @@ def load_data():
     df["year"] = df["year"].astype(int)
     return df
 
-# -------------------------------------------------------------
-# BİGQUERY BAĞLANTISI VE GLOBAL CLIENT
-# -------------------------------------------------------------
 try:
-    key_dict = dict(st.secrets["gcp_service_account"])
-    raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
-    key_dict["private_key"] = raw_key
-    credentials = service_account.Credentials.from_service_account_info(key_dict)
-    
-    # Global client: Hem okumada hem de Excel yüklemede burası kullanılacak
-    client = bigquery.Client(credentials=credentials, project="sustainability-510714")
-    
     df = load_data()
 except Exception as e:
-    st.error(f"BigQuery bağlantı hatası oluştu: {e}")
+    st.error(f"BigQuery connection error: {e}")
     st.stop()
 
 # -------------------------------------------------------------
-# 2. FİLTRELER
+# 2. ÜST BAŞLIK VE SAĞ ÜST EXCEL YÖNETİMİ (POPOVER)
 # -------------------------------------------------------------
-st.title("Sustainability Data Platform")
-st.caption("BigQuery Dataproduct: `sustainability-510714.sustainability_data.sustainability_dataset`")
+col_head1, col_head2 = st.columns([3, 1])
 
+with col_head1:
+    st.title("Sustainability Data Platform")
+    st.caption("BigQuery Dataproduct: `sustainability-510714.sustainability_data.sustainability_dataset`")
+
+with col_head2:
+    st.write("")  # Dikey hizalama
+    with st.popover("📥 Data Management (Excel)", use_container_width=True):
+        st.markdown("#### 📊 Excel Operations")
+        
+        # 1. Excel İndirme
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="SustainabilityData")
+
+        st.download_button(
+            label="⬇️ Download Current Data",
+            data=buffer.getvalue(),
+            file_name="sustainability_data.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+        st.divider()
+
+        # 2. Excel Yükleme (Session State Korumalı)
+        st.markdown("#### 📤 Update / Add Data")
+        uploaded_file = st.file_uploader(
+            "Select Excel File", 
+            type=["xlsx"],
+            key="excel_file_input"
+        )
+
+        if uploaded_file is not None:
+            st.session_state["cached_excel_file"] = uploaded_file
+
+        if "cached_excel_file" in st.session_state and st.session_state["cached_excel_file"] is not None:
+            active_file = st.session_state["cached_excel_file"]
+            try:
+                active_file.seek(0)
+                new_df = pd.read_excel(active_file)
+                new_df.columns = [str(col).strip().lower() for col in new_df.columns]
+                
+                required_cols = [
+                    "company_name", 
+                    "year", 
+                    "total_electricity_consumed_kwh",
+                    "offsite_electricity_percentage", 
+                    "renewable_energy_percentage", 
+                    "total_gas_consumed_m3"
+                ]
+                
+                missing_cols = [col for col in required_cols if col not in new_df.columns]
+                
+                if missing_cols:
+                    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                else:
+                    st.info(f"📄 Loaded {len(new_df)} rows from `{active_file.name}`")
+                    
+                    if st.button("🚀 Upload & Update BigQuery", type="primary", use_container_width=True):
+                        with st.spinner("Processing data into BigQuery..."):
+                            for col in required_cols[2:]:
+                                new_df[col] = pd.to_numeric(new_df[col], errors="coerce").fillna(0.0)
+                            new_df["year"] = new_df["year"].astype(int)
+                            new_df["company_name"] = new_df["company_name"].astype(str)
+
+                            client = get_bigquery_client()
+
+                            # Upsert: Aynı şirket ve yıl varsa yenisi geçerli olur
+                            combined_df = pd.concat([df[required_cols], new_df[required_cols]]).drop_duplicates(
+                                subset=["company_name", "year"], 
+                                keep="last"
+                            ).reset_index(drop=True)
+
+                            target_table = "sustainability-510714.sustainability_data.sustainability_dataset"
+
+                            # Ücretsiz Load Job ile yazma (Billing / DML hatası vermez)
+                            job_config = bigquery.LoadJobConfig(
+                                write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+                            )
+                            load_job = client.load_table_from_dataframe(combined_df, target_table, job_config=job_config)
+                            load_job.result()
+
+                            del st.session_state["cached_excel_file"]
+                            st.session_state["upload_success"] = True
+                            st.cache_data.clear()
+                            st.rerun()
+
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+# Başarı bildirimi (Yenileme sonrasında sayfanın üstünde kalıcı görünür)
+if st.session_state.get("upload_success"):
+    st.success("✅ Data successfully updated in BigQuery and platform refreshed!")
+    st.balloons()
+    del st.session_state["upload_success"]
+
+# -------------------------------------------------------------
+# 3. FİLTRELER
+# -------------------------------------------------------------
 col_filter1, col_filter2 = st.columns([2, 1])
 
 companies = sorted(df["company_name"].dropna().unique())
@@ -97,7 +181,7 @@ with col_filter2:
 filtered_df = df[(df["company_name"] == selected_company) & (df["year"] == selected_year)]
 
 if filtered_df.empty:
-    st.warning("Seçilen şirket ve yıla ait kayıt bulunamadı.")
+    st.warning("No records found for the selected company and year.")
     st.stop()
 
 data = filtered_df.iloc[0]
@@ -105,7 +189,7 @@ data = filtered_df.iloc[0]
 st.divider()
 
 # -------------------------------------------------------------
-# 3. DASHBOARD 1: ENERJİ DAĞILIMI VE ELEKTRİK
+# 4. DASHBOARD 1: ENERJİ DAĞILIMI VE ELEKTRİK
 # -------------------------------------------------------------
 st.subheader("Electricity & Renewable Energy Share")
 
@@ -149,12 +233,11 @@ with d1_col2:
 st.divider()
 
 # -------------------------------------------------------------
-# 4. DASHBOARD 2: TÜKETİM VE CO2 SALINIMI
+# 5. DASHBOARD 2: TÜKETİM VE CO2 SALINIMI
 # -------------------------------------------------------------
 st.subheader("Resource Consumption & Carbon Footprint")
 
-# Ham Metrikler
-m1, m2, m3 = st.columns(3)
+m1, m2 = st.columns(2)
 with m1:
     st.metric(
         "Total Electricity Consumption",
@@ -196,93 +279,3 @@ with c3:
         help="Electricity + Natural Gas",
         delta_color="off"
     )
-
-
-import io
-import streamlit as st
-import pandas as pd
-from google.cloud import bigquery
-
-# -------------------------------------------------------------
-# EXCEL İNDİRME VE BİGQUERY GÜNCELLEME MODÜLÜ
-# -------------------------------------------------------------
-st.sidebar.header("📥 Veri Yönetimi")
-
-# 1. Mevcut BigQuery Verisini Excel Olarak İndirme
-buffer = io.BytesIO()
-with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-    df.to_excel(writer, index=False, sheet_name="SustainabilityData")
-
-st.sidebar.download_button(
-    label="📊 Güncel Veriyi Excel Olarak İndir",
-    data=buffer.getvalue(),
-    file_name="sustainability_data.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
-st.sidebar.divider()
-
-# 2. Güncellenmiş Excel Dosyasını Yükleme
-st.sidebar.subheader("📤 Veri Güncelle / Ekle")
-uploaded_file = st.sidebar.file_uploader(
-    "Düzenlenmiş Excel dosyasını yükleyin", 
-    type=["xlsx"]
-)
-
-if uploaded_file is not None:
-    try:
-        new_df = pd.read_excel(uploaded_file)
-        new_df.columns = [str(col).strip().lower() for col in new_df.columns]
-        
-        required_cols = [
-            "company_name", 
-            "year", 
-            "total_electricity_consumed_kwh",
-            "offsite_electricity_percentage", 
-            "renewable_energy_percentage", 
-            "total_gas_consumed_m3"
-        ]
-        
-        missing_cols = [col for col in required_cols if col not in new_df.columns]
-        
-        if missing_cols:
-            st.error(f"❌ Missing required columns in Excel file: **{', '.join(missing_cols)}**")
-        else:
-            # Önizleme göstererek dosyanın okunduğunu teyit edin
-            st.caption(f"📄 File loaded: {len(new_df)} rows detected.")
-            
-            if st.button("🚀 Upload & Update BigQuery", type="primary", use_container_width=True):
-                with st.spinner("Syncing data with BigQuery..."):
-                    for col in required_cols[2:]:
-                        new_df[col] = pd.to_numeric(new_df[col], errors="coerce").fillna(0.0)
-                    new_df["year"] = new_df["year"].astype(int)
-                    new_df["company_name"] = new_df["company_name"].astype(str)
-
-                    # BigQuery Client
-                    key_dict = dict(st.secrets["gcp_service_account"])
-                    raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
-                    key_dict["private_key"] = raw_key
-                    credentials = service_account.Credentials.from_service_account_info(key_dict)
-                    client = bigquery.Client(credentials=credentials, project="sustainability-510714")
-
-                    # Upsert (Pandas)
-                    combined_df = pd.concat([df[required_cols], new_df[required_cols]]).drop_duplicates(
-                        subset=["company_name", "year"], 
-                        keep="last"
-                    ).reset_index(drop=True)
-
-                    target_table = "sustainability-510714.sustainability_data.sustainability_dataset"
-
-                    job_config = bigquery.LoadJobConfig(
-                        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
-                    )
-                    load_job = client.load_table_from_dataframe(combined_df, target_table, job_config=job_config)
-                    load_job.result()
-
-                    # Başarı durumunu session_state'e kaydet
-                    st.session_state["upload_success"] = True
-                    st.cache_data.clear()
-                    st.rerun()
-
-    except Exception as e:
-        st.error(f"An error occurred during processing: {e}")
