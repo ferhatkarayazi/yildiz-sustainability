@@ -185,3 +185,107 @@ with c3:
         help="Electricity + Natural Gas",
         delta_color="off"
     )
+
+
+import io
+import streamlit as st
+import pandas as pd
+from google.cloud import bigquery
+
+# -------------------------------------------------------------
+# EXCEL İNDİRME VE BİGQUERY GÜNCELLEME MODÜLÜ
+# -------------------------------------------------------------
+st.sidebar.header("📥 Veri Yönetimi")
+
+# 1. Mevcut BigQuery Verisini Excel Olarak İndirme
+buffer = io.BytesIO()
+with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+    df.to_excel(writer, index=False, sheet_name="SustainabilityData")
+
+st.sidebar.download_button(
+    label="📊 Güncel Veriyi Excel Olarak İndir",
+    data=buffer.getvalue(),
+    file_name="sustainability_data.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+st.sidebar.divider()
+
+# 2. Güncellenmiş Excel Dosyasını Yükleme
+st.sidebar.subheader("📤 Veri Güncelle / Ekle")
+uploaded_file = st.sidebar.file_uploader(
+    "Düzenlenmiş Excel dosyasını yükleyin", 
+    type=["xlsx"]
+)
+
+if uploaded_file is not None:
+    try:
+        new_df = pd.read_excel(uploaded_file)
+        
+        # Beklenen zorunlu kolonların kontrolü
+        required_cols = [
+            "company_name", "year", "total_electricity_consumed_kwh",
+            "offsite_electricity_percentage", "renewable_energy_percentage",
+            "total_gas_consumed_m3", "total_km_covered_km"
+        ]
+        
+        if not all(col in new_df.columns for col in required_cols):
+            st.sidebar.error("Hata: Excel dosyasındaki kolon isimleri BigQuery şemasıyla uyuşmuyor.")
+        else:
+            if st.sidebar.button("🚀 BigQuery'ye Aktar ve Güncelle"):
+                with st.spinner("Veriler BigQuery'ye işleniyor..."):
+                    # Veri tiplerini güvenli hale getir
+                    for col in required_cols[2:]:
+                        new_df[col] = pd.to_numeric(new_df[col], errors="coerce").fillna(0.0)
+                    new_df["year"] = new_df["year"].astype(int)
+                    new_df["company_name"] = new_df["company_name"].astype(str)
+
+                    # BigQuery Client (Daha önce tanımlanan client nesnesi)
+                    project_id = "sustainability-510714"
+                    dataset_id = "sustainability_data"
+                    target_table = f"{project_id}.{dataset_id}.sustainability_dataset"
+                    temp_table = f"{project_id}.{dataset_id}.temp_sustainability_upload"
+
+                    # 1. Adım: Geçici (Staging) tabloya yükle
+                    job_config = bigquery.LoadJobConfig(
+                        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
+                    )
+                    load_job = client.load_table_from_dataframe(new_df, temp_table, job_config=job_config)
+                    load_job.result()  # Yüklemenin bitmesini bekle
+
+                    # 2. Adım: MERGE sorgusuyla varsa güncelle, yoksa ekle (Upsert)
+                    merge_query = f"""
+                        MERGE `{target_table}` T
+                        USING `{temp_table}` S
+                        ON T.company_name = S.company_name AND T.year = S.year
+                        WHEN MATCHED THEN
+                          UPDATE SET
+                            total_electricity_consumed_kwh = S.total_electricity_consumed_kwh,
+                            offsite_electricity_percentage = S.offsite_electricity_percentage,
+                            renewable_energy_percentage = S.renewable_energy_percentage,
+                            total_gas_consumed_m3 = S.total_gas_consumed_m3,
+                            total_km_covered_km = S.total_km_covered_km
+                        WHEN NOT MATCHED THEN
+                          INSERT (
+                            company_name, year, total_electricity_consumed_kwh,
+                            offsite_electricity_percentage, renewable_energy_percentage,
+                            total_gas_consumed_m3, total_km_covered_km
+                          )
+                          VALUES (
+                            S.company_name, S.year, S.total_electricity_consumed_kwh,
+                            S.offsite_electricity_percentage, S.renewable_energy_percentage,
+                            S.total_gas_consumed_m3, S.total_km_covered_km
+                          );
+                    """
+                    client.query(merge_query).result()
+
+                    # 3. Adım: Geçici tabloyu temizle
+                    client.delete_table(temp_table, not_found_ok=True)
+
+                    # Streamlit önbelleğini sıfırla ve sayfayı yenile
+                    st.cache_data.clear()
+                    st.sidebar.success("Veriler başarıyla güncellendi!")
+                    st.rerun()
+
+    except Exception as e:
+        st.sidebar.error(f"İşlem sırasında hata oluştu: {e}")
