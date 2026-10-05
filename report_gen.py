@@ -209,7 +209,7 @@ def generate_pdf_report(selected_company, company_df):
             [
                 Paragraph(f"{co2_elec_kg:,.0f} kg CO<sub>2</sub>".replace(",", "."), kpi_val_style),
                 Paragraph(f"{co2_gas_kg:,.0f} kg CO<sub>2</sub>".replace(",", "."), kpi_val_style),
-                Paragraph(f"{total_co2_tons:,.2f} Ton CO<sub>2</sub>e".replace(",", "."), kpi_val_style)
+                Paragraph(f"{total_co2_tons:,.2f} Ton CO<sub>2</sub>".replace(",", "."), kpi_val_style)
             ]
         ]
         co2_table = Table(co2_data, colWidths=[180, 180, 180])
