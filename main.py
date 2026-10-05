@@ -226,7 +226,7 @@ if uploaded_file is not None:
         required_cols = [
             "company_name", "year", "total_electricity_consumed_kwh",
             "offsite_electricity_percentage", "renewable_energy_percentage",
-            "total_gas_consumed_m3", "total_km_covered_km"
+            "total_gas_consumed_m3"
         ]
         
         if not all(col in new_df.columns for col in required_cols):
