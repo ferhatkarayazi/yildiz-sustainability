@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Yıldız Holding Sürdürülebilirlik Portali", layout="wide")
+
+st.set_page_config(page_title="Yıldız Holding Sürdürülebilirlik Portal", layout="wide")
 
 st.title("Yıldız Holding - Şirket Bazlı Sürdürülebilirlik Raporu ")
 st.caption("Phase: MVP")
