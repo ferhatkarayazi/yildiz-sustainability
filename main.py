@@ -1,11 +1,12 @@
-from report_gen import generate_pdf_report
-
 import io
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from google.cloud import bigquery
 from google.oauth2 import service_account
+
+# report_gen dosyamızdan fonksiyonu çağırıyoruz
+from report_gen import generate_pdf_report
 
 # Sayfa Yapılandırması
 st.set_page_config(
@@ -66,7 +67,13 @@ except Exception as e:
     st.stop()
 
 # -------------------------------------------------------------
-# 2. ÜST BAŞLIK VE SAĞ ÜST EXCEL YÖNETİMİ (POPOVER)
+# 2. ŞİRKET VE YIL LİSTESİ
+# -------------------------------------------------------------
+companies = sorted(df["company_name"].dropna().unique())
+years = sorted(df["year"].dropna().unique(), reverse=True)
+
+# -------------------------------------------------------------
+# 3. ÜST BAŞLIK, FİLTRELER VE SAĞ MENÜ (POPOVER)
 # -------------------------------------------------------------
 col_head1, col_head2 = st.columns([3, 1])
 
@@ -74,10 +81,17 @@ with col_head1:
     st.title("Sustainability Data Platform")
     st.caption("BigQuery Dataproduct: `sustainability-510714.sustainability_data.sustainability_dataset`")
 
+# Filtre Seçimleri
+col_filter1, col_filter2 = st.columns([2, 1])
+with col_filter1:
+    selected_company = st.selectbox("Select Company", companies)
+with col_filter2:
+    selected_year = st.selectbox("Select Year", years)
+
 with col_head2:
-    st.write("")  # Dikey hizalama
+    st.write("")
     with st.popover("Data Import/Export", use_container_width=True):
-        st.markdown("#### Excel Operations")
+        st.markdown("#### Export Operations")
         
         # 1. Excel İndirme
         buffer = io.BytesIO()
@@ -85,26 +99,29 @@ with col_head2:
             df.to_excel(writer, index=False, sheet_name="SustainabilityData")
 
         st.download_button(
-            label="Download Raw Data",
+            label="⬇️ Download Raw Data (Excel)",
             data=buffer.getvalue(),
             file_name="sustainability_data.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-        # 2. PDF Rapor İndirme (report_gen.py üzerinden)
-        pdf_bytes = generate_pdf_report(df)
+
+        # 2. PDF İndirme (3 Yıllık Rapor)
+        company_all_years_df = df[df["company_name"] == selected_company]
+        pdf_bytes = generate_pdf_report(selected_company, company_all_years_df)
+        
         st.download_button(
-            label="Download Sustainability and Carbon Report(PDF)",
+            label="📑 Download 3-Year KPI Report (PDF)",
             data=pdf_bytes,
-            file_name="Sustainability_and_Carbon_Report.pdf",
+            file_name=f"Sustainability_Report_{selected_company}_2025_2027.pdf",
             mime="application/pdf",
             use_container_width=True
         )
 
         st.divider()
 
-        # 2. Excel Yükleme (Session State Korumalı)
-        st.markdown("#### Update / Raw Data")
+        # 3. Excel Yükleme
+        st.markdown("#### Update / Upload Data")
         uploaded_file = st.file_uploader(
             "Select Excel File", 
             type=["xlsx"],
@@ -146,7 +163,6 @@ with col_head2:
 
                             client = get_bigquery_client()
 
-                            # Upsert: Aynı şirket ve yıl varsa yenisi geçerli olur
                             combined_df = pd.concat([df[required_cols], new_df[required_cols]]).drop_duplicates(
                                 subset=["company_name", "year"], 
                                 keep="last"
@@ -154,7 +170,6 @@ with col_head2:
 
                             target_table = "sustainability-510714.sustainability_data.sustainability_dataset"
 
-                            # Ücretsiz Load Job ile yazma (Billing / DML hatası vermez)
                             job_config = bigquery.LoadJobConfig(
                                 write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
                             )
@@ -169,26 +184,15 @@ with col_head2:
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
-# Başarı bildirimi (Yenileme sonrasında sayfanın üstünde kalıcı görünür)
+# Başarı bildirimi
 if st.session_state.get("upload_success"):
     st.toast("BigQuery dataset successfully synchronized.", icon="✅")
     st.success("Data updated successfully. Dashboard visualizations have been refreshed.")
     del st.session_state["upload_success"]
 
 # -------------------------------------------------------------
-# 3. FİLTRELER
+# 4. GÖRSELLEŞTİRME VE DASHBOARD METRİKLERİ
 # -------------------------------------------------------------
-col_filter1, col_filter2 = st.columns([2, 1])
-
-companies = sorted(df["company_name"].dropna().unique())
-years = sorted(df["year"].dropna().unique(), reverse=True)
-
-with col_filter1:
-    selected_company = st.selectbox("Select Company", companies)
-
-with col_filter2:
-    selected_year = st.selectbox("Select Year", years)
-
 filtered_df = df[(df["company_name"] == selected_company) & (df["year"] == selected_year)]
 
 if filtered_df.empty:
@@ -199,11 +203,8 @@ data = filtered_df.iloc[0]
 
 st.divider()
 
-# -------------------------------------------------------------
-# 4. DASHBOARD 1: ENERJİ DAĞILIMI VE ELEKTRİK
-# -------------------------------------------------------------
+# DASHBOARD 1: Enerji Dağılımı
 st.subheader("Electricity & Renewable Energy Share")
-
 d1_col1, d1_col2 = st.columns([1, 2])
 
 with d1_col1:
@@ -243,9 +244,7 @@ with d1_col2:
 
 st.divider()
 
-# -------------------------------------------------------------
-# 5. DASHBOARD 2: TÜKETİM VE CO2 SALINIMI
-# -------------------------------------------------------------
+# DASHBOARD 2: Tüketim ve Emisyon
 st.subheader("Resource Consumption & Carbon Footprint")
 
 m1, m2 = st.columns(2)
@@ -260,8 +259,6 @@ with m2:
         f"{float(data['total_gas_consumed_m3']):,.0f} m³".replace(",", ".")
     )
 
-# Emisyon Hesaplamaları:
-# 1 kWh = 0.40 kg CO2 | 1 m3 doğalgaz = 2.00 kg CO2
 elec_kwh = float(data["total_electricity_consumed_kwh"])
 gas_m3 = float(data["total_gas_consumed_m3"])
 
