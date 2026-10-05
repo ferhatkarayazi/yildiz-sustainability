@@ -69,8 +69,8 @@ except Exception as e:
 # -------------------------------------------------------------
 # 2. FİLTRELER
 # -------------------------------------------------------------
-st.title("🌱 Yıldız Holding Sürdürülebilirlik Paneli")
-st.caption("BigQuery: `sustainability-510714.sustainability_data.sustainability_dataset`")
+st.title("Sustainability Data Platform")
+st.caption("BigQuery Dataproduct: `sustainability-510714.sustainability_data.sustainability_dataset`")
 
 col_filter1, col_filter2 = st.columns([2, 1])
 
@@ -138,9 +138,9 @@ with d1_col2:
 st.divider()
 
 # -------------------------------------------------------------
-# 4. DASHBOARD 2: TÜKETİM, MESAFE VE CO2 SALINIMI
+# 4. DASHBOARD 2: TÜKETİM VE CO2 SALINIMI
 # -------------------------------------------------------------
-st.subheader("2. Resource Consumption & Carbon Footprint")
+st.subheader("Resource Consumption & Carbon Footprint")
 
 # Ham Metrikler
 m1, m2, m3 = st.columns(3)
@@ -165,7 +165,7 @@ co2_gas_kg = gas_m3 * 2.00
 total_co2_kg = co2_elec_kg + co2_gas_kg
 total_co2_tons = total_co2_kg / 1000.0
 
-st.markdown("#### 🌍 Carbon Footprint Calculation")
+st.markdown("#### Carbon Footprint Calculation")
 
 c1, c2, c3 = st.columns(3)
 with c1:
