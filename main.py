@@ -60,7 +60,18 @@ def load_data():
     df["year"] = df["year"].astype(int)
     return df
 
+# -------------------------------------------------------------
+# BİGQUERY BAĞLANTISI VE GLOBAL CLIENT
+# -------------------------------------------------------------
 try:
+    key_dict = dict(st.secrets["gcp_service_account"])
+    raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
+    key_dict["private_key"] = raw_key
+    credentials = service_account.Credentials.from_service_account_info(key_dict)
+    
+    # Global client: Hem okumada hem de Excel yüklemede burası kullanılacak
+    client = bigquery.Client(credentials=credentials, project="sustainability-510714")
+    
     df = load_data()
 except Exception as e:
     st.error(f"BigQuery bağlantı hatası oluştu: {e}")
