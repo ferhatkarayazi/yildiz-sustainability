@@ -74,8 +74,8 @@ with col_head1:
 
 with col_head2:
     st.write("")  # Dikey hizalama
-    with st.popover("📥 Data Management (Excel)", use_container_width=True):
-        st.markdown("#### 📊 Excel Operations")
+    with st.popover("Data Import/Export", use_container_width=True):
+        st.markdown("#### Excel Operations")
         
         # 1. Excel İndirme
         buffer = io.BytesIO()
@@ -83,7 +83,7 @@ with col_head2:
             df.to_excel(writer, index=False, sheet_name="SustainabilityData")
 
         st.download_button(
-            label="⬇️ Download Current Data",
+            label="Download Current Data",
             data=buffer.getvalue(),
             file_name="sustainability_data.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -93,7 +93,7 @@ with col_head2:
         st.divider()
 
         # 2. Excel Yükleme (Session State Korumalı)
-        st.markdown("#### 📤 Update / Add Data")
+        st.markdown("#### Update / Add Data")
         uploaded_file = st.file_uploader(
             "Select Excel File", 
             type=["xlsx"],
@@ -160,8 +160,8 @@ with col_head2:
 
 # Başarı bildirimi (Yenileme sonrasında sayfanın üstünde kalıcı görünür)
 if st.session_state.get("upload_success"):
-    st.success("✅ Data successfully updated in BigQuery and platform refreshed!")
-    st.balloons()
+    st.toast("BigQuery dataset successfully synchronized.", icon="✅")
+    st.success("Data updated successfully. Dashboard visualizations have been refreshed.")
     del st.session_state["upload_success"]
 
 # -------------------------------------------------------------
