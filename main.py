@@ -1,3 +1,5 @@
+from report_gen import generate_pdf_report
+
 import io
 import streamlit as st
 import pandas as pd
@@ -83,17 +85,26 @@ with col_head2:
             df.to_excel(writer, index=False, sheet_name="SustainabilityData")
 
         st.download_button(
-            label="Download Current Data",
+            label="Download Raw Data",
             data=buffer.getvalue(),
             file_name="sustainability_data.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        # 2. PDF Rapor İndirme (report_gen.py üzerinden)
+        pdf_bytes = generate_pdf_report(df)
+        st.download_button(
+            label="Download Sustainability and Carbon Report(PDF)",
+            data=pdf_bytes,
+            file_name="Sustainability_and_Carbon_Report.pdf",
+            mime="application/pdf",
             use_container_width=True
         )
 
         st.divider()
 
         # 2. Excel Yükleme (Session State Korumalı)
-        st.markdown("#### Update / Add Data")
+        st.markdown("#### Update / Raw Data")
         uploaded_file = st.file_uploader(
             "Select Excel File", 
             type=["xlsx"],
