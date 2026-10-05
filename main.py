@@ -1,88 +1,189 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
+# Sayfa Yapılandırması
+st.set_page_config(
+    page_title="Yıldız Holding - Sürdürülebilirlik Paneli",
+    page_icon="🌱",
+    layout="wide"
+)
 
-st.set_page_config(page_title="Yıldız Holding Sürdürülebilirlik Portal", layout="wide")
+# -------------------------------------------------------------
+# 1. BİGQUERY BAĞLANTISI VE VERİ ÇEKME
+# -------------------------------------------------------------
+@st.cache_data(ttl=600)
+def load_data():
+    project_id = "sustainability-510714"
+    table_id = "sustainability-510714.sustainability_data.sustainability_dataset"
 
-st.title("Yıldız Holding - Şirket Bazlı Sürdürülebilirlik Raporu ")
-st.caption("Phase: MVP")
+    # Streamlit Cloud üzerinde Secrets kontrolü
+    if "gcp_service_account" in st.secrets:
+        # dict() sarmalaması olası AttrDict uyuşmazlığını engeller
+        key_dict = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(key_dict)
+        client = bigquery.Client(credentials=credentials, project=project_id)
+    else:
+        # Yerel geliştirme için (GOOGLE_APPLICATION_CREDENTIALS yüklüyse)
+        client = bigquery.Client(project=project_id)
 
-# 10 Şirket ve Temel KPI Verisi
-data = [
-    {"Şirket": "Ülker Bisküvi (Topkapı)", "Ülke": "Türkiye", "Kategori": "Atıştırmalık", "Scope1_tCO2e": 2850,
-     "Scope2_tCO2e": 4120, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%4.2"},
-    {"Şirket": "pladis UK (Harlesden)", "Ülke": "İngiltere", "Kategori": "Bisküvi", "Scope1_tCO2e": 1940,
-     "Scope2_tCO2e": 2850, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%6.1"},
-    {"Şirket": "Godiva Belgium (Brüksel)", "Ülke": "Belçika", "Kategori": "Premium Çikolata", "Scope1_tCO2e": 1120,
-     "Scope2_tCO2e": 1680, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%8.5"},
-    {"Şirket": "Kerevitaş (Bursa Dondurulmuş)", "Ülke": "Türkiye", "Kategori": "Dondurulmuş Gıda", "Scope1_tCO2e": 3410,
-     "Scope2_tCO2e": 5200, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%2.0"},
-    {"Şirket": "Besler Yağ (Gebze)", "Ülke": "Türkiye", "Kategori": "Yağ & Margarin", "Scope1_tCO2e": 2980,
-     "Scope2_tCO2e": 3900, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "+%1.4"},
-    {"Şirket": "pladis Mena (Suudi Arabistan)", "Ülke": "Suudi Arabistan", "Kategori": "Atıştırmalık",
-     "Scope1_tCO2e": 1450, "Scope2_tCO2e": 2400, "Veri_Durumu": "İnceleme Bekliyor", "YoY_Degisim": "-%3.0"},
-    {"Şirket": "Ereks Dış Ticaret (Romanya)", "Ülke": "Romanya", "Kategori": "Paketleme/Ticaret", "Scope1_tCO2e": 620,
-     "Scope2_tCO2e": 950, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%5.0"},
-    {"Şirket": "Polmlek / pladis CEE (Polonya)", "Ülke": "Polonya", "Kategori": "Kek & Bisküvi", "Scope1_tCO2e": 1300,
-     "Scope2_tCO2e": 1950, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%7.2"},
-    {"Şirket": "Ülker Çikolata (Silivri)", "Ülke": "Türkiye", "Kategori": "Çikolata", "Scope1_tCO2e": 2150,
-     "Scope2_tCO2e": 3200, "Veri_Durumu": "Onaylandı", "YoY_Degisim": "-%3.8"},
-    {"Şirket": "United Biscuits (Fransa)", "Ülke": "Fransa", "Kategori": "Bisküvi Dağıtım", "Scope1_tCO2e": 480,
-     "Scope2_tCO2e": 710, "Veri_Durumu": "Veri Bekleniyor", "YoY_Degisim": "0.0%"}
-]
+    query = f"""
+        SELECT 
+            company_name,
+            year,
+            total_electricity_consumed_kwh,
+            offsite_electricity_percentage,
+            renewable_energy_percentage,
+            total_gas_consumed_m3,
+            total_km_covered_km
+        FROM `{table_id}`
+        ORDER BY company_name, year DESC
+    """
+    df = client.query(query).to_dataframe()
 
-df = pd.DataFrame(data)
-df["Toplam_tCO2e"] = df["Scope1_tCO2e"] + df["Scope2_tCO2e"]
+    # Sayısal alanları güvenli bir şekilde float/int türlerine zorla
+    numeric_cols = [
+        "total_electricity_consumed_kwh",
+        "offsite_electricity_percentage",
+        "renewable_energy_percentage",
+        "total_gas_consumed_m3",
+        "total_km_covered_km"
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-# Üst Özet Kartlar
-c1, c2, c3 = st.columns(3)
-c1.metric("Toplam İzlenen Emisyon", f"{df['Toplam_tCO2e'].sum():,d} tCO₂e")
-c2.metric("İzlenen Şirket Sayısı", f"{len(df)} Şirket")
-onay_orani = (len(df[df['Veri_Durumu'] == 'Onaylandı']) / len(df)) * 100
-c3.metric("Veri Tamamlanma Oranı", f"%{onay_orani:.0f}")
+    df["year"] = df["year"].astype(int)
+    return df
 
-st.markdown("---")
+try:
+    df = load_data()
+except Exception as e:
+    st.error(f"BigQuery bağlantı hatası oluştu: {e}")
+    st.stop()
 
-# Sol Kolon: Genel Karşılaştırma Grafiği | Sağ Kolon: Şirket Detayı (Tıklama / Seçim)
-col_left, col_right = st.columns([3, 2])
+# -------------------------------------------------------------
+# 2. FİLTRELER
+# -------------------------------------------------------------
+st.title("🌱 Yıldız Holding Sürdürülebilirlik Paneli")
+st.caption("BigQuery: `sustainability-510714.sustainability_data.sustainability_dataset`")
 
-with col_left:
-    st.subheader("📊 Şirketlerin Toplam Karbon Ayak İzi (tCO₂e)")
-    fig = px.bar(
-        df.sort_values(by="Toplam_tCO2e", ascending=True),
-        x="Toplam_tCO2e",
-        y="Şirket",
-        orientation="h",
-        color="Kategori",
-        text_auto=",.0f",
-        labels={"Toplam_tCO2e": "Toplam Emisyon (tCO₂e)", "Şirket": ""}
+col_filter1, col_filter2 = st.columns([2, 1])
+
+companies = sorted(df["company_name"].dropna().unique())
+years = sorted(df["year"].dropna().unique(), reverse=True)
+
+with col_filter1:
+    selected_company = st.selectbox("🏢 Şirket Seçin", companies)
+
+with col_filter2:
+    selected_year = st.selectbox("📅 Yıl Seçin", years)
+
+filtered_df = df[(df["company_name"] == selected_company) & (df["year"] == selected_year)]
+
+if filtered_df.empty:
+    st.warning("Seçilen şirket ve yıla ait kayıt bulunamadı.")
+    st.stop()
+
+data = filtered_df.iloc[0]
+
+st.divider()
+
+# -------------------------------------------------------------
+# 3. DASHBOARD 1: ENERJİ DAĞILIMI VE ELEKTRİK
+# -------------------------------------------------------------
+st.subheader("1. Enerji Dağılımı ve Elektrik Tüketimi")
+
+d1_col1, d1_col2 = st.columns([1, 2])
+
+with d1_col1:
+    st.metric(
+        label="Toplam Elektrik Tüketimi",
+        value=f"{float(data['total_electricity_consumed_kwh']):,.0f} kWh".replace(",", ".")
     )
-    fig.update_layout(height=480, margin=dict(l=0, r=20, t=30, b=20))
-    st.plotly_chart(fig, use_container_width=True)
+    st.info(
+        f"**Tesis Dışı (Offsite) Elektrik:** %{float(data['offsite_electricity_percentage']):.1f}\n\n"
+        f"**Yenilenebilir Enerji Oranı:** %{float(data['renewable_energy_percentage']):.1f}"
+    )
 
-with col_right:
-    st.subheader("🔍 Şirket Detayına Tıkla / Seç")
-    secilen_sirket = st.selectbox("İncelemek istediğiniz şirketi seçin:", df["Şirket"].tolist())
+with d1_col2:
+    pie_data = pd.DataFrame({
+        "Kaynak": ["Offsite Elektrik", "Yenilenebilir Enerji"],
+        "Yüzde": [
+            float(data["offsite_electricity_percentage"]),
+            float(data["renewable_energy_percentage"])
+        ]
+    })
 
-    # Seçilen şirketin verisini filtrele
-    sirket_data = df[df["Şirket"] == secilen_sirket].iloc[0]
-
-    st.markdown(f"### {secilen_sirket}")
-    st.write(f"**Ülke:** {sirket_data['Ülke']} | **Kategori:** {sirket_data['Kategori']}")
-
-    sub_c1, sub_c2 = st.columns(2)
-    sub_c1.metric("Scope 1 (Doğrudan Gaz/Yakıt)", f"{sirket_data['Scope1_tCO2e']:,d} tCO₂e")
-    sub_c2.metric("Scope 2 (Şebeke Elektrik)", f"{sirket_data['Scope2_tCO2e']:,d} tCO₂e")
-
-    st.info(f"**Yıllık Değişim (YoY):** {sirket_data['YoY_Degisim']} | **Onay Durumu:** {sirket_data['Veri_Durumu']}")
-
-    # Kapsam Dağılım Grafiği
-    pie_fig = px.pie(
-        values=[sirket_data['Scope1_tCO2e'], sirket_data['Scope2_tCO2e']],
-        names=["Scope 1", "Scope 2"],
+    fig_pie = px.pie(
+        pie_data,
+        names="Kaynak",
+        values="Yüzde",
+        color="Kaynak",
+        color_discrete_map={
+            "Offsite Elektrik": "#2563EB",
+            "Yenilenebilir Enerji": "#10B981"
+        },
         hole=0.45,
-        color_discrete_sequence=["#059669", "#10b981"]
+        title=f"{selected_company} - Elektrik Kaynak Dağılımı ({selected_year})"
     )
-    pie_fig.update_layout(height=220, margin=dict(l=10, r=10, t=20, b=10))
-    st.plotly_chart(pie_fig, use_container_width=True)
+    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+    fig_pie.update_layout(margin=dict(t=40, b=10, l=10, r=10), height=300)
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+st.divider()
+
+# -------------------------------------------------------------
+# 4. DASHBOARD 2: TÜKETİM, MESAFE VE CO2 SALINIMI
+# -------------------------------------------------------------
+st.subheader("2. Kaynak Tüketimi & Karbon Ayak İzi (t-CO₂e)")
+
+# Ham Metrikler
+m1, m2, m3 = st.columns(3)
+with m1:
+    st.metric(
+        "Toplam Elektrik",
+        f"{float(data['total_electricity_consumed_kwh']):,.0f} kWh".replace(",", ".")
+    )
+with m2:
+    st.metric(
+        "Toplam Doğalgaz",
+        f"{float(data['total_gas_consumed_m3']):,.0f} m³".replace(",", ".")
+    )
+with m3:
+    st.metric(
+        "Katedilen Mesafe",
+        f"{float(data['total_km_covered_km']):,.0f} km".replace(",", ".")
+    )
+
+# Emisyon Hesaplamaları:
+# 1 kWh = 0.40 kg CO2 | 1 m3 doğalgaz = 2.00 kg CO2
+elec_kwh = float(data["total_electricity_consumed_kwh"])
+gas_m3 = float(data["total_gas_consumed_m3"])
+
+co2_elec_kg = elec_kwh * 0.40
+co2_gas_kg = gas_m3 * 2.00
+total_co2_kg = co2_elec_kg + co2_gas_kg
+total_co2_tons = total_co2_kg / 1000.0
+
+st.markdown("#### 🌍 Karbon Salınım Hesaplaması")
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.metric(
+        label="Elektrik Kaynaklı Salınım (0,40 kg/kWh)",
+        value=f"{co2_elec_kg:,.0f} kg CO₂".replace(",", ".")
+    )
+with c2:
+    st.metric(
+        label="Doğalgaz Kaynaklı Salınım (2,00 kg/m³)",
+        value=f"{co2_gas_kg:,.0f} kg CO₂".replace(",", ".")
+    )
+with c3:
+    st.metric(
+        label="Toplam Karbon Ayak İzi",
+        value=f"{total_co2_tons:,.2f} Ton CO₂e".replace(",", "."),
+        delta="Elektrik + Doğalgaz",
+        delta_color="off"
+    )
