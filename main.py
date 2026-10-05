@@ -182,6 +182,6 @@ with c3:
     st.metric(
         label="Total Carbon Footprint",
         value=f"{total_co2_tons:,.2f} Ton CO₂e".replace(",", "."),
-        delta="Electricity + Natural Gas",
+        help="Electricity + Natural Gas",
         delta_color="off"
     )
