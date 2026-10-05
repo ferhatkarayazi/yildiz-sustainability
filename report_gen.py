@@ -86,7 +86,7 @@ def generate_pdf_report(selected_company, company_df):
 
     # Şirketin hiçbir verisi yoksa boş sayfa yerine bilgi notu üret
     if not target_years:
-        story.append(Paragraph(f"Sustainability Report — {selected_company}", title_style))
+        story.append(Paragraph(f"Sustainability and Carbon Report — {selected_company}", title_style))
         story.append(Paragraph(f"No records found for {selected_company} in the database.", subtitle_style))
         doc.build(story)
         pdf_buffer.seek(0)
@@ -96,8 +96,8 @@ def generate_pdf_report(selected_company, company_df):
         row_match = company_df[company_df["year"] == year]
         
         # Sayfa Başlığı
-        story.append(Paragraph(f"Sustainability Report — {selected_company}", title_style))
-        story.append(Paragraph(f"Reporting Year: <b>{year}</b> (Page {idx + 1} of {len(target_years)}) | BigQuery Dataproduct", subtitle_style))
+        story.append(Paragraph(f"Sustainability and Carbon Report — {selected_company}", title_style))
+        story.append(Paragraph(f"Reporting Year: <b>{year}</b> (Page {idx + 1} of {len(target_years)})", subtitle_style))
         story.append(Spacer(1, 4))
 
         data_row = row_match.iloc[0]
