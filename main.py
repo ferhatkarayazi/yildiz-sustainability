@@ -232,11 +232,8 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file is not None:
     try:
         new_df = pd.read_excel(uploaded_file)
-        
-        # Sütun başlıklarındaki boşlukları temizle ve küçük harfe çevir
         new_df.columns = [str(col).strip().lower() for col in new_df.columns]
         
-        # Zorunlu kolonlar
         required_cols = [
             "company_name", 
             "year", 
@@ -251,22 +248,24 @@ if uploaded_file is not None:
         if missing_cols:
             st.error(f"❌ Missing required columns in Excel file: **{', '.join(missing_cols)}**")
         else:
+            # Önizleme göstererek dosyanın okunduğunu teyit edin
+            st.caption(f"📄 File loaded: {len(new_df)} rows detected.")
+            
             if st.button("🚀 Upload & Update BigQuery", type="primary", use_container_width=True):
                 with st.spinner("Syncing data with BigQuery..."):
-                    # Veri tiplerini güvenli formata dönüştür
                     for col in required_cols[2:]:
                         new_df[col] = pd.to_numeric(new_df[col], errors="coerce").fillna(0.0)
                     new_df["year"] = new_df["year"].astype(int)
                     new_df["company_name"] = new_df["company_name"].astype(str)
 
-                    # BigQuery Client kurulumu
+                    # BigQuery Client
                     key_dict = dict(st.secrets["gcp_service_account"])
                     raw_key = key_dict["private_key"].replace("\\n", "\n").replace("\r", "").strip()
                     key_dict["private_key"] = raw_key
                     credentials = service_account.Credentials.from_service_account_info(key_dict)
                     client = bigquery.Client(credentials=credentials, project="sustainability-510714")
 
-                    # Mevcut veriyle birleştir (Upsert: Aynı şirket ve yıl varsa yüklenen Excel geçerli olur)
+                    # Upsert (Pandas)
                     combined_df = pd.concat([df[required_cols], new_df[required_cols]]).drop_duplicates(
                         subset=["company_name", "year"], 
                         keep="last"
@@ -274,16 +273,15 @@ if uploaded_file is not None:
 
                     target_table = "sustainability-510714.sustainability_data.sustainability_dataset"
 
-                    # Ücretsiz Load Job ile tablonun üzerine yazma
                     job_config = bigquery.LoadJobConfig(
                         write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE
                     )
                     load_job = client.load_table_from_dataframe(combined_df, target_table, job_config=job_config)
                     load_job.result()
 
-                    # Önbelleği temizle ve sayfayı yenile
+                    # Başarı durumunu session_state'e kaydet
+                    st.session_state["upload_success"] = True
                     st.cache_data.clear()
-                    st.success("✅ Data successfully updated in BigQuery!")
                     st.rerun()
 
     except Exception as e:
